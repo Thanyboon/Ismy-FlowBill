@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FlowBill">
+    <link rel="apple-touch-icon" href="https://i.postimg.cc/mD3f4m0S/1000013111.png">
+    <meta name="theme-color" content="#2563eb">
+    
+    <link rel="manifest" href='data:application/manifest+json,{"name":"FlowBill","short_name":"FlowBill","start_url":"index.html","display":"standalone","background_color":"#f1f5f9","theme_color":"#2563eb","icons":[{"src":"https://i.postimg.cc/mD3f4m0S/1000013111.png","sizes":"192x192","type":"image/png"},{"src":"https://i.postimg.cc/mD3f4m0S/1000013111.png","sizes":"512x512","type":"image/png"}]}'>
+
+    <title>FlowBill v6.5 - Cloud & Electric</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        body { 
+            font-family: 'Kanit', sans-serif; 
+            background: #f8fafc; 
+            color: #1e293b; 
+            -webkit-tap-highlight-color: transparent;
+            user-select: none; /* ป้องกันการคลุมดำโดยไม่ตั้งใจในมือถือ */
+        }
+        .card-ui { background: white; border-radius: 24px; box-shadow: 0 4px 15px -3px rgb(0 0 0 / 0.07); }
+        .input-label { font-size: 10px; font-weight: 700; color: #64748b; margin-left: 8px; margin-bottom: 4px; display: block; text-transform: uppercase; }
+        .dual-receipt-wrapper { display: flex; gap: 2px; background: #cbd5e1; padding: 2px; border-radius: 24px; overflow: hidden; width: fit-content; }
+        .receipt-container { width: 340px; background: white; padding: 25px; position: relative; }
+        .tab-active { background: #2563eb; color: white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+        
+        /* สไตล์พิเศษสำหรับ Safe Area บน iPhone (ติ่งหน้าจอ) */
+        nav { padding-top: env(safe-area-inset-top); }
+        
+        /* ซ่อน Scrollbar */
+        ::-webkit-scrollbar { display: none; }
+
+        @media (max-width: 768px) {
+            .dual-receipt-wrapper { flex-direction: column; width: 100%; }
+            .receipt-container { width: 100%; }
+        }
+    </style>
+</head>
+<body class="pb-20">
+
+    <div id="syncStatusBanner" class="bg-slate-900 text-white text-[10px] text-center py-2 font-bold sticky top-0 z-[100] flex items-center justify-center gap-2">
+        <span id="dot" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        <span id="statusText">กำลัง Sync ข้อมูล...</span>
+    </div>
+
+    <nav class="sticky top-[35px] z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex justify-between items-center mx-4 rounded-2xl shadow-sm mt-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200">F</div>
+            <h1 class="text-lg font-black tracking-tight">FlowBill <span class="text-blue-500 text-xs">v6.5</span></h1>
+        </div>
+        <button onclick="openHistory()" class="p-2 px-4 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs active:scale-95 transition-all">📂 คลังบิล</button>
+    </nav>
+
+    <main class="max-w-[1200px] mx-auto p-4 grid grid-cols-1 xl:grid-cols-[400px_1fr] gap-8 mt-6">
+        
+        <div class="space-y-6">
+            <div class="card-ui p-4 border border-blue-100 bg-blue-50/30">
+                <span class="input-label text-blue-500">ชื่อกลุ่ม (ข้อมูลจะแชร์กันในชื่อนี้)</span>
+                <input type="text" id="billGroup" value="บิลทั่วไป" onchange="render()" class="w-full p-3 bg-white rounded-xl border-2 border-blue-100 outline-none font-bold text-blue-600 focus:border-blue-400">
+            </div>
+
+            <div class="flex bg-slate-200 p-1 rounded-2xl">
+                <button onclick="switchTab('finance')" id="tab-finance" class="flex-1 py-3 text-[11px] font-bold rounded-xl tab-active transition-all">💸 รายจ่าย</button>
+                <button onclick="switchTab('electric')" id="tab-electric" class="flex-1 py-3 text-[11px] font-bold rounded-xl text-slate-500 transition-all">⚡ ค่าไฟ</button>
+                <button onclick="switchTab('receipt')" id="tab-receipt" class="flex-1 py-3 text-[11px] font-bold rounded-xl text-slate-500 transition-all">📄 หารบิล</button>
+            </div>
+
+            <div class="card-ui p-6 space-y-5">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <span class="input-label">วันที่</span>
+                        <input type="date" id="inputDate" class="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-sm">
+                    </div>
+                    <div>
+                        <span class="input-label">ประเภท</span>
+                        <select id="type" class="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold text-sm">
+                            <option value="expense">รายจ่าย (-)</option>
+                            <option value="income">รายรับ (+)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="finance-inputs" class="space-y-4">
+                    <div><span class="input-label">รายการ</span><input type="text" id="note" placeholder="ใส่ชื่อรายการ..." class="w-full p-4 bg-slate-50 rounded-2xl outline-none"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><span class="input-label">ราคา</span><input type="number" id="unitPrice" oninput="calcAll()" placeholder="0.00" class="w-full p-4 bg-slate-50 rounded-2xl text-center font-bold"></div>
+                        <div><span class="input-label">จำนวน</span><input type="number" id="qty" oninput="calcAll()" value="1" class="w-full p-4 bg-slate-50 rounded-2xl text-center font-bold"></div>
+                    </div>
+                </div>
+
+                <div id="electric-inputs" class="space-y-4 hidden">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><span class="input-label">เลขเก่า</span><input type="number" id="meterOld" oninput="calcAll()" placeholder="000" class="w-full p-4 bg-slate-50 rounded-2xl text-center font-bold"></div>
+                        <div><span class="input-label">เลขใหม่</span><input type="number" id="meterNew" oninput="calcAll()" placeholder="000" class="w-full p-4 bg-slate-50 rounded-2xl text-center font-bold"></div>
+                    </div>
+                    <div><span class="input-label text-blue-600">ค่าไฟต่อหน่วย</span><input type="number" id="electricRate" oninput="calcAll()" value="7" class="w-full p-4 bg-blue-50 rounded-2xl text-center font-black text-blue-600 border border-blue-100"></div>
+                    <p id="electricSummary" class="text-center text-xs font-bold text-slate-400">กรุณาใส่เลขมิเตอร์</p>
+                </div>
+
+                <div id="receipt-inputs" class="space-y-4 hidden">
+                    <div><span class="input-label text-emerald-600">รายการที่จะหาร</span><input type="text" id="receiptItemName" placeholder="เช่น ค่าส้มตำ" class="w-full p-4 bg-emerald-50 rounded-2xl border border-emerald-100 font-bold"></div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div><span class="input-label">ราคา</span><input type="number" id="receiptUnitPrice" oninput="calcAll()" placeholder="0.00" class="w-full p-3 bg-slate-50 rounded-xl text-center font-bold"></div>
+                        <div><span class="input-label">ชิ้น</span><input type="number" id="receiptQty" oninput="calcAll()" value="1" class="w-full p-3 bg-slate-50 rounded-xl text-center font-bold"></div>
+                        <div><span class="input-label text-indigo-600">หาร (คน)</span><input type="number" id="splitCount" oninput="calcAll()" value="1" class="w-full p-3 bg-indigo-100 rounded-xl text-center font-black text-indigo-600 border border-indigo-200"></div>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <input type="number" id="amt" placeholder="0.00" class="w-full p-5 bg-blue-600 text-white rounded-[32px] text-4xl font-black text-center shadow-lg shadow-blue-200" readonly>
+                    <button onclick="saveData()" class="w-full mt-6 bg-slate-900 text-white p-5 rounded-2xl font-bold text-lg active:scale-90 transition-all">✅ บันทึก (Cloud)</button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="exportImg('single')" class="p-4 bg-white border border-slate-200 rounded-2xl font-bold text-slate-600 active:bg-slate-100 text-xs">📸 รูปเดี่ยว</button>
+                <button onclick="exportImg('dual')" class="p-4 bg-white border border-slate-200 rounded-2xl font-bold text-blue-600 active:bg-blue-50 text-xs">📸 รูปคู่</button>
+            </div>
+        </div>
+
+        <div id="captureArea" class="flex flex-col items-center pb-10">
+            <div class="dual-receipt-wrapper shadow-2xl" id="receipt">
+                <div id="single-receipt-only" class="receipt-container border-r border-dashed border-slate-200">
+                    <div class="text-center border-b-2 border-dashed border-slate-100 pb-4 mb-4">
+                        <h2 class="text-2xl font-black italic">FLOWBILL</h2>
+                        <p id="billTitleDisplay" class="text-[9px] text-blue-500 font-bold uppercase"></p>
+                    </div>
+                    <div id="bill-list-normal" class="min-h-[200px] space-y-3"></div>
+                    <div class="mt-6 pt-4 border-t-2 border-slate-900 flex justify-between items-end">
+                        <span class="text-[10px] font-bold">TOTAL</span>
+                        <span id="total-normal" class="text-2xl font-black">0.00</span>
+                    </div>
+                </div>
+                <div class="receipt-container">
+                    <div class="text-center border-b-2 border-dashed border-slate-100 pb-4 mb-4">
+                        <h2 class="text-2xl font-black italic text-indigo-600">SPLIT-PAY</h2>
+                        <p class="text-[9px] text-indigo-400 font-bold uppercase">Amount Per Person</p>
+                    </div>
+                    <div id="bill-list-split" class="min-h-[200px] space-y-3"></div>
+                    <div class="mt-6 pt-4 border-t-2 border-indigo-600 flex justify-between items-end">
+                        <span class="text-[10px] font-bold text-indigo-600 uppercase">You Pay</span>
+                        <span id="total-split" class="text-2xl font-black text-indigo-600">0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="historyModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] hidden items-end justify-center" onclick="closeHistory()">
+        <div class="bg-white w-full max-w-md rounded-t-[32px] p-6 max-h-[80vh] overflow-y-auto animate-slide-up" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold">คลังบิลทั้งหมด</h2>
+                <button onclick="closeHistory()" class="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold">✕</button>
+            </div>
+            <div id="historyList" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = { databaseURL: "https://mybillapp-99a67-default-rtdb.asia-southeast1.firebasedatabase.app" };
+        let database, allItems = [], currentMode = 'finance';
+
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+            database.ref('.info/connected').on('value', snap => {
+                const sText = document.getElementById('statusText');
+                const dot = document.getElementById('dot');
+                sText.innerText = snap.val() ? "ออนไลน์ (Cloud Sync)" : "ออฟไลน์ (แก้ไขได้ปกติ)";
+                dot.className = snap.val() ? "w-2 h-2 rounded-full bg-emerald-500" : "w-2 h-2 rounded-full bg-rose-500 animate-ping";
+            });
+            database.ref('bills').on('value', snap => {
+                const data = snap.val();
+                allItems = data ? Object.values(data) : [];
+                render();
+            });
+        } catch (e) { console.error("Firebase Error: ", e); }
+
+        document.getElementById('inputDate').valueAsDate = new Date();
+
+        function switchTab(mode) {
+            currentMode = mode;
+            ['finance', 'electric', 'receipt'].forEach(m => {
+                document.getElementById(`${m}-inputs`).classList.toggle('hidden', m !== mode);
+                document.getElementById(`tab-${m}`).className = m === mode ? 'flex-1 py-3 text-[11px] font-bold rounded-xl tab-active transition-all' : 'flex-1 py-3 text-[11px] font-bold rounded-xl text-slate-500 transition-all';
+            });
+            calcAll();
+        }
+
+        function calcAll() {
+            let total = 0;
+            if (currentMode === 'finance') {
+                total = (parseFloat(document.getElementById('unitPrice').value || 0) * parseFloat(document.getElementById('qty').value || 1));
+            } else if (currentMode === 'electric') {
+                const u = Math.max(0, parseFloat(document.getElementById('meterNew').value || 0) - parseFloat(document.getElementById('meterOld').value || 0));
+                const r = parseFloat(document.getElementById('electricRate').value || 0);
+                total = u * r;
+                document.getElementById('electricSummary').innerText = `สรุป: ใช้ไฟไป ${u} หน่วย x ${r} บาท`;
+            } else if (currentMode === 'receipt') {
+                total = (parseFloat(document.getElementById('receiptUnitPrice').value || 0) * parseFloat(document.getElementById('receiptQty').value || 1));
+            }
+            document.getElementById('amt').value = total.toFixed(2);
+        }
+
+        function saveData() {
+            const amt = parseFloat(document.getElementById('amt').value);
+            if(!amt || amt <= 0) return alert('กรุณาระบุจำนวนเงิน');
+            
+            const id = Date.now().toString();
+            const group = document.getElementById('billGroup').value;
+            let note = "", split = 1;
+
+            if (currentMode === 'finance') note = document.getElementById('note').value || 'รายจ่าย';
+            else if (currentMode === 'electric') {
+                const u = parseFloat(document.getElementById('meterNew').value || 0) - parseFloat(document.getElementById('meterOld').value || 0);
+                note = `ค่าไฟ (${u} หน่วย)`;
+            } 
+            else if (currentMode === 'receipt') {
+                note = document.getElementById('receiptItemName').value || 'รายการหาร';
+                split = parseInt(document.getElementById('splitCount').value || 1);
+            }
+
+            const item = { id, group, split, amt, note, date: document.getElementById('inputDate').value, type: document.getElementById('type').value };
+            database.ref('bills/' + id).set(item);
+            resetInputs();
+            if (window.navigator.vibrate) window.navigator.vibrate(50); // สั่นเมื่อบันทึกสำเร็จ
+        }
+
+        function resetInputs() {
+            ['note','unitPrice','meterOld','meterNew','receiptItemName','receiptUnitPrice'].forEach(i => document.getElementById(i).value = '');
+            ['qty','receiptQty','splitCount'].forEach(i => document.getElementById(i).value = '1');
+            calcAll();
+        }
+
+        function render() {
+            const group = document.getElementById('billGroup').value;
+            document.getElementById('billTitleDisplay').innerText = group;
+            const listN = document.getElementById('bill-list-normal');
+            const listS = document.getElementById('bill-list-split');
+            listN.innerHTML = ''; listS.innerHTML = '';
+            let totalN = 0, totalS = 0;
+            
+            allItems.filter(i => i.group === group).sort((a,b) => b.id - a.id).forEach(i => {
+                const isExp = i.type === 'expense';
+                const splitAmt = i.amt / i.split;
+                totalN += isExp ? -i.amt : i.amt;
+                totalS += isExp ? -splitAmt : splitAmt;
+
+                const rowTemplate = (val) => `<div class="flex justify-between items-center py-2 border-b border-slate-50">
+                    <div><p class="text-xs font-bold">${i.note}</p><p class="text-[8px] text-slate-400">${i.date}</p></div>
+                    <div class="text-right"><p class="text-xs font-black ${isExp?'text-rose-500':'text-emerald-500'}">${isExp?'-':'+'}${val.toLocaleString()}</p>
+                    <button onclick="deleteItem('${i.id}')" class="text-[8px] text-slate-300 font-bold uppercase">Delete</button></div></div>`;
+                listN.innerHTML += rowTemplate(i.amt);
+                listS.innerHTML += rowTemplate(splitAmt);
+            });
+            document.getElementById('total-normal').innerText = totalN.toLocaleString(undefined, {minimumFractionDigits: 2});
+            document.getElementById('total-split').innerText = totalS.toLocaleString(undefined, {minimumFractionDigits: 2});
+        }
+
+        function deleteItem(id) { if(confirm('ลบรายการนี้ใช่ไหม?')) database.ref('bills/' + id).remove(); }
+        
+        async function exportImg(type) {
+            const target = type === 'single' ? document.getElementById('single-receipt-only') : document.getElementById('receipt');
+            const canvas = await html2canvas(target, { scale: 3, backgroundColor: "#ffffff" });
+            const link = document.createElement('a');
+            link.download = `Bill-${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        function openHistory() {
+            document.getElementById('historyModal').style.display = 'flex';
+            const groups = {};
+            allItems.forEach(i => groups[i.group] = (groups[i.group] || 0) + (i.type === 'expense' ? -i.amt : i.amt));
+            document.getElementById('historyList').innerHTML = Object.keys(groups).map(g => `<div onclick="selectGroup('${g}')" class="p-5 bg-slate-50 rounded-2xl flex justify-between items-center active:bg-blue-100"><span class="font-bold">${g}</span><span class="font-black ${groups[g]>=0?'text-emerald-500':'text-rose-500'}">${groups[g].toLocaleString()}</span></div>`).join('');
+        }
+        function selectGroup(g) { document.getElementById('billGroup').value = g; render(); closeHistory(); }
+        function closeHistory() { document.getElementById('historyModal').style.display = 'none'; }
+    </script>
+</body>
+</html>
